@@ -4,6 +4,9 @@ from justone import __version__ as justone_version
 with open('Readme.md', 'r', encoding='utf-8') as fh:
     long_description = fh.read()
 
+
+print(f'setuptools.find_packages() is {setuptools.find_packages()}')
+
 setuptools.setup(
     name='justone',
     version=justone_version,

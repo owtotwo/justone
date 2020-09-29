@@ -1,23 +1,31 @@
 """
-Fast duplicate file finder.
+Duplicate files finder.
 Usage: duplicates.py <folder> [<folder>...]
 
-Based on https://stackoverflow.com/a/36113168/300783
-Modified for Python3 with some small code improvements.
+Inspired by https://stackoverflow.com/a/36113168/300783
 """
 import hashlib
-from io import BufferedReader
-import os
-import sys
 import stat
-from os import scandir, DirEntry, PathLike
+import sys
 from collections import defaultdict
-from sys import path
-from typing import DefaultDict, Iterable, Iterator, List, Sequence, Union, AnyStr
+from io import BufferedReader
+from os import DirEntry, PathLike, scandir
 from pathlib import Path
-from tqdm import tqdm
+from typing import AnyStr, DefaultDict, Final, Iterable, Iterator, List, Sequence, Union
 
-import knives
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:
+    tqdm = lambda x: x
+
+__author__: Final[str] = 'owtotwo'
+__copyright__: Final[str] = 'Copyright 2020 owtotwo'
+__credits__: Final[Sequence[str]] = ['owtotwo']
+__license__: Final[str] = 'LGPLv3'
+__version__: Final[str] = '0.0.1'
+__maintainer__: Final[str] = 'owtotwo'
+__email__: Final[str] = 'owtotwo@163.com'
+__status__: Final[str] = 'Experimental'
 
 
 class JustOneError(Exception):
@@ -26,6 +34,15 @@ class JustOneError(Exception):
 
 class FindDuplicatesError(JustOneError):
     """ Error when find_duplicates() running. """
+
+
+# return string like '[aaa] -> [bbb] -> [ccc]'
+def format_exception_chain(e: BaseException):
+    # recursive function, get exception chain from __cause__
+    def get_exception_chain(e: BaseException) -> List[BaseException]:
+        return [e] if e.__cause__ is None else [e] + get_exception_chain(e.__cause__)
+
+    return ''.join(f'[{exc}]' if i == 0 else f' -> [{exc}]' for i, exc in enumerate(reversed(get_exception_chain(e))))
 
 
 def get_hash(fp: Path, first_chunk_only: bool = False, hash_algo=hashlib.sha1) -> bytes:
@@ -134,7 +151,6 @@ def find_duplicates(fps_or_dp: Union[Iterable[Path], Path, str]) -> Iterable[Seq
     return filter(lambda x: len(x) > 1, files_by_full_hash.values())
 
 
-@knives.measure_time
 def print_duplicates(dp: Path):
     try:
         duplicates_list = find_duplicates(dp)
@@ -149,7 +165,6 @@ def print_duplicates(dp: Path):
     return 0
 
 
-@knives.measure_profile
 def main():
     def print_usage():
         print(f'Usage: justone <folder_path>')
@@ -172,63 +187,5 @@ def main():
     return print_duplicates(dp)
 
 
-@knives.measure_profile
-def test():
-    dp = Path(r'X:\music(deprecated)')
-    print_duplicates(dp)
-
-
-def test_dig_file_methods():
-    @knives.measure_time
-    def test_walk(dp):
-        def walk_dir(dp):
-            for dirpath, _, filenames in os.walk(dp):
-                dirpath = Path(dirpath)
-                for filename in filenames:
-                    yield dirpath / filename
-
-        print(len(list(walk_dir(dp))))
-
-    @knives.measure_time
-    def test_rglob(dp):
-        print(len(list(dp.rglob('*'))))
-
-    @knives.measure_time
-    def test_iterdir(dp):
-        def iter_dir(dp):
-            for p in dp.iterdir():
-                if p.is_dir():
-                    for i in iter_dir(p):
-                        yield i
-                else:
-                    yield p
-
-        print(len(list(iter_dir(dp))))
-
-    @knives.measure_time
-    def test_scandir(dp):
-        def scan_dir_raw(dp: Union[AnyStr, PathLike]) -> Iterator[DirEntry]:
-            with os.scandir(dp) as it:
-                for entry in it:
-                    if entry.is_dir():
-                        for e in scan_dir_raw(entry.path):
-                            yield e
-                    else:
-                        yield entry
-
-        def scan_dir(dp):
-            for entry in scan_dir_raw(dp):
-                yield Path(entry.path)
-
-        print(len(list(scan_dir(dp))))
-
-    dp = Path(r'X:\music(deprecated)')
-    test_walk(dp)
-    test_rglob(dp)
-    test_iterdir(dp)
-    test_scandir(dp)
-
-
 if __name__ == '__main__':
-    # sys.exit(main())
-    test()
+    sys.exit(main())

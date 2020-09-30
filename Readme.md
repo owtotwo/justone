@@ -18,8 +18,8 @@ Usage: justone <folder_path>
 - Python3.7+
 - pip
 - pypi
-  + bencode.py == 4.0.0
-  + requests == 2.24.0
+  + xxhash == 2.0.0 (Recommended, but not necessary)
+  + tqdm == 4.49.0 (Not necessary)
 
 
 ## Install by pip and Run on Win10

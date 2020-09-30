@@ -37,7 +37,7 @@ __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
 __credits__: Final[Sequence[str]] = ['owtotwo']
 __license__: Final[str] = 'LGPLv3'
-__version__: Final[str] = '0.1.0'
+__version__: Final[str] = '0.1.1'
 __maintainer__: Final[str] = 'owtotwo'
 __email__: Final[str] = 'owtotwo@163.com'
 __status__: Final[str] = 'Experimental'
@@ -108,6 +108,7 @@ class JustOne:
             ...
         }
         """
+        self.hash_func: Callable = hash_func
         self.file_info: List[Tuple[FileIndex, Path, FileSize, Optional[HashValue], Optional[HashValue]]] = []
         self.file_index: Dict[Path, FileIndex] = {}
         self.size_dict: DefaultDict[FileSize, Set[FileIndex]] = defaultdict(set)
@@ -168,6 +169,7 @@ class JustOne:
         if index is None:
             file_size = file.stat().st_size if file_size is None else file_size
             index = len(self.file_info)
+            self.file_index[file] = index
             self.file_info.append((index, file, file_size, small_hash, full_hash))
         return index
 
@@ -198,7 +200,7 @@ class JustOne:
         except IndexError as e:
             raise GetSmallHashError from e
         if small_hash is None:
-            small_hash = self._get_hash(file, first_chunk_only=True)
+            small_hash = self._get_hash(file, first_chunk_only=True, hash_func=self.hash_func)
             self.file_info[index] = (index, file, file_size, small_hash, full_hash)
         return small_hash
 
@@ -211,7 +213,7 @@ class JustOne:
         except IndexError as e:
             raise GetFullHashError from e
         if full_hash is None:
-            full_hash = self._get_hash(file, first_chunk_only=False)
+            full_hash = self._get_hash(file, first_chunk_only=False, hash_func=self.hash_func)
             self.file_info[index] = (index, file, file_size, small_hash, full_hash)
         return full_hash
 
@@ -358,12 +360,6 @@ class JustOne:
             ...
         ]
         """
-        # for k, v in full_hash_dict_temp.items():
-        #     index_set = self.full_hash_dict[k]
-        #     index_set |= v
-        #     if len(index_set) > 1:
-        #         for index in v:
-        #             yield index
         for _, v in self.full_hash_dict.items():
             yield tuple(self._get_file_info(file_index)[0] for file_index in v)
 

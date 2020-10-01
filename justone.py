@@ -1,6 +1,7 @@
 """
-Duplicate files finder.
-Usage: py justone.py <folder>
+Fast duplicate files finder.
+
+Usage: justone.py [-h] [-s] [-v] FOLDER [FOLDER ...]
 
 Inspired by https://stackoverflow.com/a/36113168/300783
 """
@@ -8,6 +9,7 @@ import itertools
 import platform
 import stat
 import sys
+import argparse
 from collections import defaultdict
 from io import BufferedReader
 from os import DirEntry, PathLike, scandir
@@ -29,7 +31,7 @@ except ModuleNotFoundError:
 
 try:
     from tqdm import tqdm
-    tqdm2 = lambda x: tqdm(tuple(x))
+    tqdm2: Callable = lambda x: tqdm(tuple(x), ascii=False)
 except ModuleNotFoundError:
     tqdm2: Callable = lambda x: x
 
@@ -37,7 +39,7 @@ __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
 __credits__: Final[Sequence[str]] = ['owtotwo']
 __license__: Final[str] = 'LGPLv3'
-__version__: Final[str] = '0.1.1'
+__version__: Final[str] = '0.1.2'
 __maintainer__: Final[str] = 'owtotwo'
 __email__: Final[str] = 'owtotwo@163.com'
 __status__: Final[str] = 'Experimental'
@@ -46,21 +48,15 @@ HASH_FUNCTION_DEFAULT: Final[Callable] = _hash_func_default
 SMALL_HASH_CHUNK_SIZE_DEFAULT: Final[int] = 1024
 
 
-class UnreachableError(RuntimeError):
-    """ like unreachable in rust, which means the code will not reach expectedly. """
-
-
-class JustOneError(Exception):
-    """ Base Exception for this module. """
-
-
 # return string like '[aaa] -> [bbb] -> [ccc]'
-def format_exception_chain(e: BaseException):
+def format_exception_chain(e: BaseException) -> str:
     # recursive function, get exception chain from __cause__
     def get_exception_chain(e: BaseException) -> List[BaseException]:
         return [e] if e.__cause__ is None else [e] + get_exception_chain(e.__cause__)
 
-    return ''.join(f'[{exc}]' if i == 0 else f' -> [{exc}]' for i, exc in enumerate(reversed(get_exception_chain(e))))
+    # use Exception class name as string if no message in Exception object
+    e2s = lambda e: str(e) or e.__class__.__name__
+    return ''.join(f'[{e2s(exc)}]' if i == 0 else f' -> [{e2s(exc)}]' for i, exc in enumerate(reversed(get_exception_chain(e))))
 
 
 # TODO: add type hints for Type Alias
@@ -71,28 +67,36 @@ SinglePath = Union[str, Path] # same as open(SinglePath)
 IterablePaths = Iterable[SinglePath]
 
 
+class UnreachableError(RuntimeError):
+    """ like unreachable in rust, which means the code will not reach expectedly. """
+
+
+class JustOneError(Exception):
+    """ Base Exception for this module. """
+
+
 class GetFileInfoError(JustOneError):
-    pass
+    """ Exception for JustOne._get_file_info """
 
 
 class UpdateFileInfoError(JustOneError):
-    pass
+    """ Exception for JustOne._update_file_info """
 
 
 class UpdateError(JustOneError):
-    pass
+    """ Exception for JustOne._update_* """
 
 
 class GetSmallHashError(JustOneError):
-    pass
+    """ Exception for JustOne._get_small_hash """
 
 
 class GetFullHashError(JustOneError):
-    pass
+    """ Exception for JustOne._get_full_hash """
 
 
 class JustOne:
-    def __init__(self, hash_func: Callable = HASH_FUNCTION_DEFAULT):
+    def __init__(self, hash_func: Callable = HASH_FUNCTION_DEFAULT) -> None:
         """
         file_info: [
           <Index, Path-Object, File-Size, Small-Hash, Full-Hash>
@@ -130,6 +134,9 @@ class JustOne:
                   first_chunk_only: bool = False,
                   first_chunk_size: int = SMALL_HASH_CHUNK_SIZE_DEFAULT,
                   hash_func: Callable = HASH_FUNCTION_DEFAULT) -> HashValue:
+        """
+        Calculate hash for file or just for first chunk of file(the fisrt 1024bytes).
+        """
         def chunk_reader(freader: BufferedReader, chunk_size: int = 1024) -> Iterator[bytes]:
             """ Generator that reads a file in chunks of bytes """
             while True:
@@ -149,7 +156,7 @@ class JustOne:
 
     def _get_file_info(self, index: FileIndex) -> Tuple[Path, FileSize, Optional[HashValue], Optional[HashValue]]:
         """
-        docstring
+        Get file info from self.file_info .
         """
         try:
             _, file, file_size, small_hash, full_hash = self.file_info[index]
@@ -163,7 +170,8 @@ class JustOne:
                        small_hash: Optional[HashValue] = None,
                        full_hash: Optional[HashValue] = None) -> FileIndex:
         """
-        docstring
+        Add file info to self.file_info .
+        If file is existed, do nothing.
         """
         index = self.file_index.get(file, None)
         if index is None:
@@ -179,7 +187,7 @@ class JustOne:
                           small_hash: Optional[HashValue] = None,
                           full_hash: Optional[HashValue] = None) -> FileIndex:
         """
-        docstring
+        Update file info to self.file_info, only support file-size, small-hash and full-hash.
         """
         try:
             index, file, file_size_old, small_hash_old, full_hash_old = self.file_info[index]
@@ -219,7 +227,8 @@ class JustOne:
 
     def _merge_size_dict(self, size_dict_temp: Dict[FileSize, Set[FileIndex]]) -> Iterator[Tuple[FileSize, FileIndex]]:
         """
-        docstring
+        Merge the new size-dict to self.size_dict .
+        Return the file(with file-size) whose duplicates are existed.
         """
         for k, v in size_dict_temp.items():
             index_set = self.size_dict[k]
@@ -230,7 +239,8 @@ class JustOne:
 
     def _merge_small_hash_dict(self, small_hash_dict_temp: Dict[Tuple[FileSize, HashValue], Set[FileIndex]]) -> Iterator[FileIndex]:
         """
-        docstring
+        Merge the new small-hash-dict to self.small_hash_dict .
+        Return the file whose duplicates are existed.
         """
         for k, v in small_hash_dict_temp.items():
             index_set = self.small_hash_dict[k]
@@ -241,6 +251,7 @@ class JustOne:
 
     def _merge_full_hash_dict(self, full_hash_dict_temp: DefaultDict[HashValue, Set[FileIndex]]) -> Iterator[FileIndex]:
         """
+        Merge the new full-hash-dict to self.full_hash_dict .
         Return the file whose duplicates are existed.
         """
         for k, v in full_hash_dict_temp.items():
@@ -252,7 +263,7 @@ class JustOne:
 
     def _update_multiple_files_with_size(self, files_with_size: Iterable[Tuple[Path, FileSize]]) -> Set[FileIndex]:
         """
-        docstring
+        Core function for update new files to JustOne object.
         """
         size_dict_temp: DefaultDict[FileSize, Set[FileIndex]] = defaultdict(set)
         small_hash_dict_temp: DefaultDict[Tuple[FileSize, HashValue], Set[FileIndex]] = defaultdict(set)
@@ -283,10 +294,10 @@ class JustOne:
 
     def _update_multiple_files(self, files: IterablePaths) -> Set[FileIndex]:
         """
-        docstring
+        Update multiple regular files to JustOne object.
         """
         files_with_size: List[Tuple[Path, FileSize]] = []
-        for file in files:
+        for file in tqdm2(files):
             file = Path(file)
             file_stat = file.stat()
             is_reg = stat.S_ISREG(file_stat.st_mode) # TODO: is symlink ...
@@ -298,7 +309,7 @@ class JustOne:
 
     def _update_single_directory(self, single_dir: SinglePath) -> Set[FileIndex]:
         """
-        docstring
+        Update one directory(all inner files recursively) to JustOne object.
         """
         try:
             files_with_size = ((Path(entry.path), entry.stat().st_size) for entry in tqdm2(JustOne._scan_dir(single_dir)))
@@ -312,25 +323,29 @@ class JustOne:
 
     def _update_multiple_directories(self, dirs: IterablePaths) -> Set[FileIndex]:
         """
-        docstring
+        Update multiple directories(all inner files recursively) to JustOne object.
         """
         duplicate_files: Set[FileIndex] = set()
         for d in dirs:
             duplicate_files |= self._update_single_directory(d)
         return duplicate_files
 
+    # No use for the time being.
     def _update_single_file(self, single_file: SinglePath) -> Set[FileIndex]:
         """
-        docstring
+        Update one file to JustOne object.
         """
         return self._update_multiple_files((single_file, ))
 
-    def update(self, arg: Union[SinglePath, IterablePaths], *args: Union[SinglePath, IterablePaths]) -> Sequence[Path]:
+    def update(self, arg: Union[SinglePath, IterablePaths], *args: Union[SinglePath, IterablePaths]) -> 'JustOne':
         """
+        The main api for JustOne object to update files.
+
+        Could be chain calling like `JustOne(hashlib.sha1).update('D:\\data').update(Path('C:\\Wegame')).duplicates()`.
         Return files whose duplicates are existed.
         e.g.:
-          1. update(file_1, file_2, file_3)
-          2. update(iterable_files)            [Not Recommended] # TODO: Modify It
+          1. update(file_1, file_2, file_3)    [Not Recommended]: file stat() calling which is too slow
+          2. update(iterable_files)            [Not Recommended]: ditto
             - update([file_1, file_2])
             - update((f for f in Path.cwd().glob('*') if f.is_file()))  # Note: This is a slow method because of f.is_file()
           3. update(dir_1, dir_2, dir_3)       [Recommended]
@@ -345,12 +360,14 @@ class JustOne:
         first = next(peek, None)
         if first is None:
             # No Path element in arg and args
-            return tuple()
+            return self
         if Path(first).is_dir():
             result: Set[FileIndex] = self._update_multiple_directories(args_iter)
         else:
             result: Set[FileIndex] = self._update_multiple_files(args_iter)
-        return tuple(self._get_file_info(file_index)[0] for file_index in result)
+        # # @Deprecated: Return Sequence[Path]
+        # return tuple(self._get_file_info(file_index)[0] for file_index in result)
+        return self
 
     def duplicates(self) -> Iterator[Sequence[Path]]:
         """
@@ -370,43 +387,60 @@ class JustOne:
     dup = duplicates
 
 
-def print_duplicates(dp: Path):
+def print_duplicates(dirpath: Path, *dirpaths: Path) -> int:
     justone = JustOne()
-
     try:
-        justone(dp)
-        duplicates_list = justone.dup()
+        duplicates_list = justone((dirpath, *dirpaths)).dup() # equal to justone.update(...).duplicates()
     except JustOneError as e:
         print(f'Error: {format_exception_chain(e)}')
         return 1
     for duplicates in duplicates_list:
         print(f'Duplicate found:')
         for fp in duplicates:
-            print(f' - {fp}')
+            try:
+                print(f' - {fp}')
+            except UnicodeEncodeError:
+                print(f' - {bytes(fp)}  [File Name Unicode Encode Error]')
         print(f'')
     return 0
 
 
-def main():
-    def print_usage():
-        print(f'Usage: justone <folder_path>')
+def parse_args():
+    def get_folder_path(path_string) -> Path:
+        p = Path(path_string)
+        if not p.is_dir():
+            raise argparse.ArgumentTypeError(f'{path_string} is not a valid path for an existed folder.')
+        return p
 
-    if len(sys.argv) == 1:
-        print_usage()
-        return 0
-    elif len(sys.argv) > 2:
-        print_usage()
+    parser = argparse.ArgumentParser(description='Fast duplicate files finder', formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument('directory', metavar='FOLDER', type=get_folder_path, nargs='+', help='文件夹路径')
+    parser.add_argument('-s', '--strict', action='store_const', const=True, default=False, help='逐个字节对比，防止hash碰撞')
+    parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='显示此命令行当前版本')
+
+    args: argparse.Namespace = parser.parse_args()
+    # if not args.directory and not args.image and not args.list:
+    #     parser.print_help()
+    # if args.list or args.image:
+    #     # the sqlite db file needs to be existed.
+    #     if not args.database.is_file():
+    #         raise argparse.ArgumentTypeError(f'{args.database} is not existed.')
+    # elif args.directory:
+    #     # make sure the directory of sqlite db file is existed.
+    #     args.database.parents[0].mkdir(parents=True, exist_ok=True)
+    return args
+
+
+def main() -> int:
+    try:
+        args: argparse.Namespace = parse_args()
+    except argparse.ArgumentTypeError as e:
+        print(f'命令行参数错误：{format_exception_chain(e)}')
         return 1
-    path_str = sys.argv[1]
-    if path_str in ('-h', '--help'):
-        print_usage()
-        return 0
-    dp = Path(path_str)
-    if not dp.is_dir():
-        print(f'Not an existed folder path.')
-        print_usage()
-        return
-    return print_duplicates(dp)
+    if args.strict:
+        print(f'此功能暂时未完成')
+        return 1
+    dirs: Final[Sequence[Path]] = args.directory
+    return print_duplicates(*dirs)
 
 
 if __name__ == '__main__':

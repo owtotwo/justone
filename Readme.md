@@ -1,15 +1,21 @@
-# justone -- find duplicate files in folder
+# justone -- Fast find duplicate files in folder
 
 `author: owtotwo`
 
-```
-Usage: py justone.py <folder_path>
-```
-
-OR
+## Usage
 
 ```
-Usage: justone <folder_path>
+usage: justone [-h] [-s] [-v] FOLDER [FOLDER ...]
+
+Fast duplicate files finder
+
+positional arguments:
+  FOLDER         文件夹路径
+
+optional arguments:
+  -h, --help     show this help message and exit
+  -s, --strict   逐个字节对比，防止hash碰撞
+  -v, --version  显示此命令行当前版本
 ```
 
 ## Requirements
@@ -26,12 +32,8 @@ Usage: justone <folder_path>
 ```
 $ pip install justone
 $ justone -h
-$ justone 'D:\data'
+$ justone 'D:\data' 'C:\WeGame'
 ```
-
-## Usage
-
-`Fake Information as below...`
 
 ## License
 [LGPLv3](./License) © [owtotwo](https://github.com/owtotwo)

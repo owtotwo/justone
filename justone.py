@@ -5,16 +5,19 @@ Usage: justone.py [-h] [-s] [-v] FOLDER [FOLDER ...]
 
 Inspired by https://stackoverflow.com/a/36113168/300783
 """
+import argparse
+import filecmp
 import itertools
 import platform
 import stat
 import sys
-import argparse
 from collections import defaultdict
+from enum import IntEnum
 from io import BufferedReader
 from os import DirEntry, PathLike, scandir
 from pathlib import Path
-from typing import AnyStr, Callable, DefaultDict, Dict, Final, Iterable, Iterator, List, Optional, Sequence, Set, Tuple, Union
+from sys import api_version
+from typing import AnyStr, Callable, DefaultDict, Dict, Final, Iterable, Iterator, List, Literal, Optional, Sequence, Set, Tuple, Union
 
 try:
     import xxhash
@@ -31,9 +34,11 @@ except ModuleNotFoundError:
 
 try:
     from tqdm import tqdm as tqdm_real
+
     def tqdm(arg, desc=None):
         return tqdm_real(tuple(arg), desc=desc, ascii=False, leave=True)
 except ModuleNotFoundError:
+
     def tqdm(arg, *_args, **_kwargs):
         return arg
 
@@ -42,25 +47,10 @@ __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
 __credits__: Final[Sequence[str]] = ['owtotwo']
 __license__: Final[str] = 'LGPLv3'
-__version__: Final[str] = '0.1.2'
+__version__: Final[str] = '0.1.3'
 __maintainer__: Final[str] = 'owtotwo'
 __email__: Final[str] = 'owtotwo@163.com'
 __status__: Final[str] = 'Experimental'
-
-HASH_FUNCTION_DEFAULT: Final[Callable] = _hash_func_default
-SMALL_HASH_CHUNK_SIZE_DEFAULT: Final[int] = 1024
-
-
-# return string like '[aaa] -> [bbb] -> [ccc]'
-def format_exception_chain(e: BaseException) -> str:
-    # recursive function, get exception chain from __cause__
-    def get_exception_chain(e: BaseException) -> List[BaseException]:
-        return [e] if e.__cause__ is None else [e] + get_exception_chain(e.__cause__)
-
-    # use Exception class name as string if no message in Exception object
-    e2s = lambda e: str(e) or e.__class__.__name__
-    return ''.join(f'[{e2s(exc)}]' if i == 0 else f' -> [{e2s(exc)}]' for i, exc in enumerate(reversed(get_exception_chain(e))))
-
 
 # TODO: add type hints for Type Alias
 FileIndex = int # the index of file_info
@@ -70,12 +60,24 @@ SinglePath = Union[str, Path] # same as open(SinglePath)
 IterablePaths = Iterable[SinglePath]
 
 
+class StrictLevel(IntEnum):
+    """ File comparison strict level """
+    COMMON = 0
+    SHALLOW = 1
+    BYTE_BY_BYTE = 2
+
+
+HASH_FUNCTION_DEFAULT: Final[Callable] = _hash_func_default
+SMALL_HASH_CHUNK_SIZE_DEFAULT: Final[int] = 1024
+STRICT_LEVEL_DEFAULT: Final[StrictLevel] = StrictLevel.COMMON
+
+
 class UnreachableError(RuntimeError):
-    """ like unreachable in rust, which means the code will not reach expectedly. """
+    """ like unreachable in rust, which means the code will not reach expectedly """
 
 
 class JustOneError(Exception):
-    """ Base Exception for this module. """
+    """ Base Exception for this module """
 
 
 class GetFileInfoError(JustOneError):
@@ -96,6 +98,21 @@ class GetSmallHashError(JustOneError):
 
 class GetFullHashError(JustOneError):
     """ Exception for JustOne._get_full_hash """
+
+
+class GetDuplicatesError(JustOneError):
+    """ Exception for JustOne.duplicates """
+
+
+# return string like '[aaa] -> [bbb] -> [ccc]'
+def format_exception_chain(e: BaseException) -> str:
+    # recursive function, get exception chain from __cause__
+    def get_exception_chain(e: BaseException) -> List[BaseException]:
+        return [e] if e.__cause__ is None else [e] + get_exception_chain(e.__cause__)
+
+    # use Exception class name as string if no message in Exception object
+    e2s = lambda e: str(e) or e.__class__.__name__
+    return ''.join(f'[{e2s(exc)}]' if i == 0 else f' -> [{e2s(exc)}]' for i, exc in enumerate(reversed(get_exception_chain(e))))
 
 
 class JustOne:
@@ -372,16 +389,54 @@ class JustOne:
         # return tuple(self._get_file_info(file_index)[0] for file_index in result)
         return self
 
-    def duplicates(self) -> Iterator[Sequence[Path]]:
+    def _duplicates_common(self) -> Iterator[Sequence[Path]]:
+        """
+        Get duplicate files by hash value.
+        """
+        for _, v in self.full_hash_dict.items():
+            dups = tuple(self._get_file_info(file_index)[0] for file_index in v)
+            if len(dups) > 1:
+                yield dups
+
+    def _duplicates_strict(self, shallow=True) -> Iterator[Sequence[Path]]:
+        """
+        Check the files which have same hash by filecmp, shallow or deep comparison.
+        """
+        for _, v in self.full_hash_dict.items():
+            if len(v) <= 1:
+                continue
+            diff_files: List[List[Path]] = [] # [[A_1, A_2], [B_1, B_2, B_3], [C_1]]
+            files = tuple(self._get_file_info(file_index)[0] for file_index in v)
+            for file in files:
+                for same_files in diff_files:
+                    first = same_files[0]
+                    if filecmp.cmp(file, first, shallow=shallow):
+                        same_files.append(file)
+                        break
+                diff_files.append([file])
+            for same_files in diff_files:
+                yield tuple(same_files)
+
+    def duplicates(self, strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT) -> Iterator[Sequence[Path]]:
         """
         Return the duplicates: [
             [file_A_1, file_A_2],
             [file_B_1, file_B_2, file_B_3],
             ...
         ]
+
+        :strict_level: [0][COMMON] compare by hash value of the whole file.
+                       [1][SHALLOW] compare by file stat first, then byte-by-byte checking if stats are different.
+                       [2][BYTE_BY_BYTE] compare by byte-by-byte checking directly.
         """
-        for _, v in self.full_hash_dict.items():
-            yield tuple(self._get_file_info(file_index)[0] for file_index in v)
+        if strict_level == StrictLevel.COMMON:
+            return self._duplicates_common()
+        elif strict_level == StrictLevel.SHALLOW:
+            return self._duplicates_strict(shallow=True)
+        elif strict_level == StrictLevel.BYTE_BY_BYTE:
+            return self._duplicates_strict(shallow=False)
+        else:
+            raise GetDuplicatesError from TypeError('the type of argument strict_level is not StrictLevel')
 
     # simple api
     __call__ = update
@@ -390,10 +445,10 @@ class JustOne:
     dup = duplicates
 
 
-def print_duplicates(dirpath: Path, *dirpaths: Path) -> int:
+def print_duplicates(dirpath: Path, *dirpaths: Path, strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT) -> int:
     justone = JustOne()
     try:
-        duplicates_list = justone((dirpath, *dirpaths)).dup() # equal to justone.update(...).duplicates()
+        duplicates_list = justone((dirpath, *dirpaths)).dup(strict_level) # equal to justone.update(...).duplicates()
     except JustOneError as e:
         print(f'Error: {format_exception_chain(e)}')
         return 1
@@ -417,10 +472,18 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Fast duplicate files finder', formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('directory', metavar='FOLDER', type=get_folder_path, nargs='+', help='文件夹路径')
-    parser.add_argument('-s', '--strict', action='store_const', const=True, default=False, help='逐个字节对比，防止hash碰撞')
+    parser.add_argument('-s',
+                        '--strict',
+                        action='count',
+                        default=0,
+                        help=(f'[0][default] 基于hash比较\n'
+                              f'[1][-s] 基于文件stat的shallow对比，不一致时进行字节对比，防止hash碰撞\n'
+                              f'[2][-ss] 严格逐个字节对比，防止文件stat与hash碰撞'))
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='显示此命令行当前版本')
 
     args: argparse.Namespace = parser.parse_args()
+    if args.strict not in (0, 1, 2):
+        raise argparse.ArgumentTypeError(f'{args.strict} is not a valid value for file comparison strict level. (need -s or -ss)')
     return args
 
 
@@ -430,11 +493,8 @@ def main() -> int:
     except argparse.ArgumentTypeError as e:
         print(f'命令行参数错误：{format_exception_chain(e)}')
         return 1
-    if args.strict:
-        print(f'此功能暂时未完成')
-        return 1
     dirs: Final[Sequence[Path]] = args.directory
-    return print_duplicates(*dirs)
+    return print_duplicates(*dirs, strict_level=args.strict)
 
 
 if __name__ == '__main__':

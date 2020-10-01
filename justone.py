@@ -30,10 +30,13 @@ except ModuleNotFoundError:
     _hash_func_default: Callable = hashlib.sha1
 
 try:
-    from tqdm import tqdm
-    tqdm2: Callable = lambda x: tqdm(tuple(x), ascii=False)
+    from tqdm import tqdm as tqdm_real
+    def tqdm(arg, desc=None):
+        return tqdm_real(tuple(arg), desc=desc, ascii=False, leave=True)
 except ModuleNotFoundError:
-    tqdm2: Callable = lambda x: x
+    def tqdm(arg, *_args, **_kwargs):
+        return arg
+
 
 __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
@@ -269,10 +272,10 @@ class JustOne:
         small_hash_dict_temp: DefaultDict[Tuple[FileSize, HashValue], Set[FileIndex]] = defaultdict(set)
         full_hash_dict_temp: DefaultDict[HashValue, Set[FileIndex]] = defaultdict(set)
         duplicate_files_index: Set[FileIndex] = set()
-        for file, file_size in tqdm2(files_with_size):
+        for file, file_size in tqdm(files_with_size, 'Fill size-dict'):
             file_index = self._add_file_info(file, file_size=file_size)
             size_dict_temp[file_size].add(file_index)
-        for file_size, file_index in tqdm2(self._merge_size_dict(size_dict_temp)):
+        for file_size, file_index in tqdm(self._merge_size_dict(size_dict_temp), 'Fill small-hash-dict'):
             try:
                 small_hash = self._get_small_hash(file_index)
             except OSError as e: # TODO: replace with more specific Exceptions
@@ -281,14 +284,14 @@ class JustOne:
             small_hash_dict_temp[(file_size, small_hash)].add(file_index)
         # For all files with the hash on the first 1024 bytes, get their hash on the full
         # file - collisions will be duplicates
-        for file_index in tqdm2(self._merge_small_hash_dict(small_hash_dict_temp)):
+        for file_index in tqdm(self._merge_small_hash_dict(small_hash_dict_temp), 'Fill full-hash-dict'):
             try:
                 full_hash = self._get_full_hash(file_index)
             except OSError as e: # TODO: replace with more specific Exceptions
                 # the file access might've changed till the exec point got here
                 raise UpdateError from e
             full_hash_dict_temp[full_hash].add(file_index)
-        for file_index in tqdm2(self._merge_full_hash_dict(full_hash_dict_temp)):
+        for file_index in tqdm(self._merge_full_hash_dict(full_hash_dict_temp), 'Get duplicate-files'):
             duplicate_files_index.add(file_index)
         return duplicate_files_index
 
@@ -297,7 +300,7 @@ class JustOne:
         Update multiple regular files to JustOne object.
         """
         files_with_size: List[Tuple[Path, FileSize]] = []
-        for file in tqdm2(files):
+        for file in tqdm(files, 'Get size-of-file'):
             file = Path(file)
             file_stat = file.stat()
             is_reg = stat.S_ISREG(file_stat.st_mode) # TODO: is symlink ...
@@ -312,7 +315,7 @@ class JustOne:
         Update one directory(all inner files recursively) to JustOne object.
         """
         try:
-            files_with_size = ((Path(entry.path), entry.stat().st_size) for entry in tqdm2(JustOne._scan_dir(single_dir)))
+            files_with_size = ((Path(entry.path), entry.stat().st_size) for entry in tqdm(JustOne._scan_dir(single_dir), 'Dig all file'))
         except NotADirectoryError as e:
             # From JustOne._scan_dir
             raise UpdateError from e
@@ -418,15 +421,6 @@ def parse_args():
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='显示此命令行当前版本')
 
     args: argparse.Namespace = parser.parse_args()
-    # if not args.directory and not args.image and not args.list:
-    #     parser.print_help()
-    # if args.list or args.image:
-    #     # the sqlite db file needs to be existed.
-    #     if not args.database.is_file():
-    #         raise argparse.ArgumentTypeError(f'{args.database} is not existed.')
-    # elif args.directory:
-    #     # make sure the directory of sqlite db file is existed.
-    #     args.database.parents[0].mkdir(parents=True, exist_ok=True)
     return args
 
 

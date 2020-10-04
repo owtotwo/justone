@@ -17,7 +17,7 @@ from enum import IntEnum
 from io import BufferedReader
 from os import DirEntry, PathLike, scandir
 from pathlib import Path
-from typing import AnyStr, Callable, DefaultDict, Dict, Final, Iterable, Iterator, List, Literal, Optional, Sequence, Set, Tuple, Union
+from typing import AnyStr, Callable, DefaultDict, Dict, Final, Iterable, Iterator, List, Literal, Optional, Sequence, Set, TextIO, Tuple, Union
 
 try:
     import xxhash
@@ -41,7 +41,7 @@ __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
 __credits__: Final[Sequence[str]] = ['owtotwo']
 __license__: Final[str] = 'LGPLv3'
-__version__: Final[str] = '0.1.4'
+__version__: Final[str] = '0.1.5'
 __maintainer__: Final[str] = 'owtotwo'
 __email__: Final[str] = 'owtotwo@163.com'
 __status__: Final[str] = 'Experimental'
@@ -480,6 +480,7 @@ class JustOne:
 
 def print_duplicates(dirpath: Path,
                      *dirpaths: Path,
+                     output: TextIO=sys.stdout,
                      strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT,
                      ignore_error: bool = False,
                      time_it: bool = False) -> int:
@@ -493,14 +494,14 @@ def print_duplicates(dirpath: Path,
             traceback.print_exc(chain=True)
         return 1
     end_time: float = time.time()
-    for duplicates in duplicates_list:
-        print(f'Duplicate found:')
+    for i, duplicates in enumerate(duplicates_list):
+        print(f'[{i+1}] Duplicate found:', file=output)
         for fp in duplicates:
             try:
-                print(f' - {fp}')
+                print(f' - {fp}', file=output)
             except UnicodeEncodeError:
-                print(f' - {bytes(fp)}  [File Name Unicode Encode Error]')
-        print(f'')
+                print(f' - {bytes(fp)}  [File Name Unicode Encode Error]', file=output)
+        print(f'', file=output)
     if time_it:
         print(f'Time Waste: {end_time-start_time:.2f}s')
     return 0
@@ -510,7 +511,13 @@ def parse_args():
     def get_folder_path(path_string) -> Path:
         p = Path(path_string)
         if not p.is_dir():
-            raise argparse.ArgumentTypeError(f'{path_string} is not a valid path for an existed folder.')
+            raise argparse.ArgumentTypeError(f'`{path_string}` is not a valid path for an existed folder.')
+        return p
+
+    def get_output_file(path_string) -> Path:
+        p = Path(path_string)
+        if p.is_dir():
+            raise argparse.ArgumentTypeError(f'`{path_string}` is a path for an existed folder.')
         return p
 
     parser = argparse.ArgumentParser(description='Fast duplicate files finder', formatter_class=argparse.RawTextHelpFormatter)
@@ -524,6 +531,7 @@ def parse_args():
                               f'[2][-ss] 严格逐个字节对比，防止文件stat与hash碰撞'))
     parser.add_argument('-i', '--ignore-error', action='store_const', const=True, default=False, help='忽略权限、文件不存在等异常，继续执行（此时将忽略相应文件的重复可能）')
     parser.add_argument('-t', '--time', action='store_const', const=True, default=False, help='记录总用时消耗')
+    parser.add_argument('-o', '--output', metavar='OUTPUT', type=get_output_file, default=None, help='查重结果输出到指定文件')
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='显示此命令行当前版本')
 
     args: argparse.Namespace = parser.parse_args()
@@ -539,7 +547,12 @@ def main() -> int:
         print(f'命令行参数错误：{format_exception_chain(e)}')
         return 1
     dirs: Final[Sequence[Path]] = args.directory
-    return print_duplicates(*dirs, strict_level=args.strict, ignore_error=args.ignore_error, time_it=args.time)
+    if args.output is not None:
+        output: Path = args.output
+        with output.open('wt') as f:
+            return print_duplicates(*dirs, output=f, strict_level=args.strict, ignore_error=args.ignore_error, time_it=args.time)
+    else:
+        return print_duplicates(*dirs, output=sys.stdout, strict_level=args.strict, ignore_error=args.ignore_error, time_it=args.time)
 
 
 if __name__ == '__main__':

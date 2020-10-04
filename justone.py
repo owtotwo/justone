@@ -1,7 +1,7 @@
 """
 Fast duplicate files finder.
 
-Usage: justone.py [-h] [-s] [-v] FOLDER [FOLDER ...]
+Typical Usage: py justone.py FOLDER [FOLDER ...] -t
 
 Inspired by https://stackoverflow.com/a/36113168/300783
 """
@@ -10,6 +10,8 @@ import filecmp
 import itertools
 import stat
 import sys
+import time
+import traceback
 from collections import defaultdict
 from enum import IntEnum
 from io import BufferedReader
@@ -39,7 +41,7 @@ __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
 __credits__: Final[Sequence[str]] = ['owtotwo']
 __license__: Final[str] = 'LGPLv3'
-__version__: Final[str] = '0.1.3'
+__version__: Final[str] = '0.1.4'
 __maintainer__: Final[str] = 'owtotwo'
 __email__: Final[str] = 'owtotwo@163.com'
 __status__: Final[str] = 'Experimental'
@@ -59,8 +61,11 @@ class StrictLevel(IntEnum):
     BYTE_BY_BYTE = 2
 
 
+_DEBUG_MODE: Final[bool] = False
+
 HASH_FUNCTION_DEFAULT: Final[Callable] = _hash_func_default
 SMALL_HASH_CHUNK_SIZE_DEFAULT: Final[int] = 1024
+FULL_HASH_CHUNK_SIZE_DEFAULT: Final[int] = 524288 # 512kb
 STRICT_LEVEL_DEFAULT: Final[StrictLevel] = StrictLevel.COMMON
 
 
@@ -108,7 +113,7 @@ def format_exception_chain(e: BaseException) -> str:
 
 
 class JustOne:
-    def __init__(self, hash_func: Callable = HASH_FUNCTION_DEFAULT) -> None:
+    def __init__(self, hash_func: Callable = HASH_FUNCTION_DEFAULT, ignore_error: bool = False) -> None:
         """
         file_info: [
           <Index, Path-Object, File-Size, Small-Hash, Full-Hash>
@@ -125,6 +130,7 @@ class JustOne:
         }
         """
         self.hash_func: Callable = hash_func
+        self.ignore_error: bool = ignore_error
         self.file_info: List[Tuple[FileIndex, Path, FileSize, Optional[HashValue], Optional[HashValue]]] = []
         self.file_index: Dict[Path, FileIndex] = {}
         self.size_dict: DefaultDict[FileSize, Set[FileIndex]] = defaultdict(set)
@@ -132,14 +138,28 @@ class JustOne:
         self.full_hash_dict: DefaultDict[HashValue, Set[FileIndex]] = defaultdict(set)
 
     @staticmethod
-    def _scan_dir(dp: Union[AnyStr, PathLike]) -> Iterator[DirEntry]:
-        with scandir(dp) as it:
-            for entry in it:
-                if entry.is_dir():
-                    for e in JustOne._scan_dir(entry.path):
-                        yield e
-                else:
-                    yield entry
+    def _scan_dir(dp: Union[AnyStr, PathLike], ignore_error: bool = False) -> Iterator[DirEntry]:
+        """
+        :ignore_error: if OSError is raised, silently swallow it.
+        """
+        def _scan_dir_raw(dp: Union[AnyStr, PathLike]) -> Iterator[DirEntry]:
+            with scandir(dp) as it:
+                for entry in it:
+                    if entry.is_dir():
+                        for e in JustOne._scan_dir(entry.path, ignore_error=ignore_error):
+                            yield e
+                    else:
+                        yield entry
+
+        if ignore_error:
+            try:
+                for e in _scan_dir_raw(dp):
+                    yield e
+            except OSError:
+                return
+        else:
+            for e in _scan_dir_raw(dp):
+                yield e
 
     @staticmethod
     def _get_hash(fp: Path,
@@ -162,7 +182,7 @@ class JustOne:
             if first_chunk_only:
                 hash_obj.update(f.read(first_chunk_size))
             else:
-                for chunk in chunk_reader(f, chunk_size=1024):
+                for chunk in chunk_reader(f, chunk_size=FULL_HASH_CHUNK_SIZE_DEFAULT):
                     hash_obj.update(chunk)
         return hash_obj.digest()
 
@@ -276,19 +296,31 @@ class JustOne:
     def _update_multiple_files_with_size(self, files_with_size: Iterable[Tuple[Path, FileSize]]) -> Set[FileIndex]:
         """
         Core function for update new files to JustOne object.
+
+        Ignore the FileNotFoundError and PermissionError if self.ignore_error is True.
         """
         size_dict_temp: DefaultDict[FileSize, Set[FileIndex]] = defaultdict(set)
         small_hash_dict_temp: DefaultDict[Tuple[FileSize, HashValue], Set[FileIndex]] = defaultdict(set)
         full_hash_dict_temp: DefaultDict[HashValue, Set[FileIndex]] = defaultdict(set)
         duplicate_files_index: Set[FileIndex] = set()
         for file, file_size in tqdm(files_with_size, 'Fill size-dict'):
-            file_index = self._add_file_info(file, file_size=file_size)
+            try:
+                file_index = self._add_file_info(file, file_size=file_size)
+            # the file access might've changed till the exec point got here
+            except FileNotFoundError as e:
+                if self.ignore_error:
+                    continue
+                raise UpdateError from e
             size_dict_temp[file_size].add(file_index)
         for file_size, file_index in tqdm(self._merge_size_dict(size_dict_temp), 'Fill small-hash-dict'):
             try:
                 small_hash = self._get_small_hash(file_index)
-            except OSError as e: # TODO: replace with more specific Exceptions
-                # the file access might've changed till the exec point got here
+            # the file access might've changed till the exec point got here
+            except (FileNotFoundError, PermissionError) as e:
+                if self.ignore_error:
+                    continue
+                raise UpdateError from e
+            except OSError as e:
                 raise UpdateError from e
             small_hash_dict_temp[(file_size, small_hash)].add(file_index)
         # For all files with the hash on the first 1024 bytes, get their hash on the full
@@ -296,8 +328,12 @@ class JustOne:
         for file_index in tqdm(self._merge_small_hash_dict(small_hash_dict_temp), 'Fill full-hash-dict'):
             try:
                 full_hash = self._get_full_hash(file_index)
+            # the file access might've changed till the exec point got here
+            except (FileNotFoundError, PermissionError) as e:
+                if self.ignore_error:
+                    continue
+                raise UpdateError from e
             except OSError as e: # TODO: replace with more specific Exceptions
-                # the file access might've changed till the exec point got here
                 raise UpdateError from e
             full_hash_dict_temp[full_hash].add(file_index)
         for file_index in tqdm(self._merge_full_hash_dict(full_hash_dict_temp), 'Get duplicate-files'):
@@ -311,9 +347,16 @@ class JustOne:
         files_with_size: List[Tuple[Path, FileSize]] = []
         for file in tqdm(files, 'Get size-of-file'):
             file = Path(file)
-            file_stat = file.stat()
+            try:
+                file_stat = file.stat()
+            except FileNotFoundError as e:
+                if self.ignore_error:
+                    continue
+                raise UpdateError from e
             is_reg = stat.S_ISREG(file_stat.st_mode) # TODO: is symlink ...
             if not is_reg:
+                if self.ignore_error:
+                    continue
                 raise UpdateError(f'Not a Regular File: {file}')
             file_size = file_stat.st_size
             files_with_size.append((file, file_size))
@@ -324,10 +367,8 @@ class JustOne:
         Update one directory(all inner files recursively) to JustOne object.
         """
         try:
-            files_with_size = ((Path(entry.path), entry.stat().st_size) for entry in tqdm(JustOne._scan_dir(single_dir), 'Dig all file'))
-        except NotADirectoryError as e:
-            # From JustOne._scan_dir
-            raise UpdateError from e
+            files_with_size = ((Path(entry.path), entry.stat().st_size)
+                               for entry in tqdm(JustOne._scan_dir(single_dir, ignore_error=self.ignore_error), 'Dig all file'))
         except OSError as e: # TODO: replace with more specific Exceptions
             # not accessible (permissions, etc)
             raise UpdateError from e
@@ -437,13 +478,21 @@ class JustOne:
     dup = duplicates
 
 
-def print_duplicates(dirpath: Path, *dirpaths: Path, strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT) -> int:
-    justone = JustOne()
+def print_duplicates(dirpath: Path,
+                     *dirpaths: Path,
+                     strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT,
+                     ignore_error: bool = False,
+                     time_it: bool = False) -> int:
+    justone = JustOne(ignore_error=ignore_error)
+    start_time: float = time.time()
     try:
         duplicates_list = justone((dirpath, *dirpaths)).dup(strict_level) # equal to justone.update(...).duplicates()
     except JustOneError as e:
         print(f'Error: {format_exception_chain(e)}')
+        if _DEBUG_MODE:
+            traceback.print_exc(chain=True)
         return 1
+    end_time: float = time.time()
     for duplicates in duplicates_list:
         print(f'Duplicate found:')
         for fp in duplicates:
@@ -452,6 +501,8 @@ def print_duplicates(dirpath: Path, *dirpaths: Path, strict_level: Union[StrictL
             except UnicodeEncodeError:
                 print(f' - {bytes(fp)}  [File Name Unicode Encode Error]')
         print(f'')
+    if time_it:
+        print(f'Time Waste: {end_time-start_time:.2f}s')
     return 0
 
 
@@ -471,6 +522,8 @@ def parse_args():
                         help=(f'[0][default] 基于hash比较\n'
                               f'[1][-s] 基于文件stat的shallow对比，不一致时进行字节对比，防止hash碰撞\n'
                               f'[2][-ss] 严格逐个字节对比，防止文件stat与hash碰撞'))
+    parser.add_argument('-i', '--ignore-error', action='store_const', const=True, default=False, help='忽略权限、文件不存在等异常，继续执行（此时将忽略相应文件的重复可能）')
+    parser.add_argument('-t', '--time', action='store_const', const=True, default=False, help='记录总用时消耗')
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='显示此命令行当前版本')
 
     args: argparse.Namespace = parser.parse_args()
@@ -486,7 +539,7 @@ def main() -> int:
         print(f'命令行参数错误：{format_exception_chain(e)}')
         return 1
     dirs: Final[Sequence[Path]] = args.directory
-    return print_duplicates(*dirs, strict_level=args.strict)
+    return print_duplicates(*dirs, strict_level=args.strict, ignore_error=args.ignore_error, time_it=args.time)
 
 
 if __name__ == '__main__':

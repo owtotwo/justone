@@ -8,7 +8,6 @@ Inspired by https://stackoverflow.com/a/36113168/300783
 import argparse
 import filecmp
 import itertools
-import platform
 import stat
 import sys
 from collections import defaultdict
@@ -16,18 +15,11 @@ from enum import IntEnum
 from io import BufferedReader
 from os import DirEntry, PathLike, scandir
 from pathlib import Path
-from sys import api_version
 from typing import AnyStr, Callable, DefaultDict, Dict, Final, Iterable, Iterator, List, Literal, Optional, Sequence, Set, Tuple, Union
 
 try:
     import xxhash
-
-    # # This can return an incorrect result if 32bit Python is running on a 64bit operating system.
-    # is_64bits = sys.maxsize > 2**32
-    if platform.machine() in {'x86_64', 'AMD64'}:
-        _hash_func_default: Callable = xxhash.xxh3_64
-    else:
-        _hash_func_default: Callable = xxhash.xxh32
+    _hash_func_default: Callable = xxhash.xxh3_128 # xxhash.xxh3_128 is six times as fast as hashlib.sha1 .
 except ModuleNotFoundError:
     import hashlib
     _hash_func_default: Callable = hashlib.sha1

@@ -260,37 +260,49 @@ class JustOne:
     def _merge_size_dict(self, size_dict_temp: Dict[FileSize, Set[FileIndex]]) -> Iterator[Tuple[FileSize, FileIndex]]:
         """
         Merge the new size-dict to self.size_dict .
-        Return the file(with file-size) whose duplicates are existed.
+        Return
+          the file(with file-size) whose duplicates are existed,
+          AND
+          the file(with file-size) which had no duplicates originally but has now.
         """
         for k, v in size_dict_temp.items():
             index_set = self.size_dict[k]
+            is_single = len(index_set) == 1
             index_set |= v
             if len(index_set) > 1:
-                for file in v:
-                    yield k, file
+                for index in (index_set if is_single else v):
+                    yield k, index
 
     def _merge_small_hash_dict(self, small_hash_dict_temp: Dict[Tuple[FileSize, HashValue], Set[FileIndex]]) -> Iterator[FileIndex]:
         """
         Merge the new small-hash-dict to self.small_hash_dict .
-        Return the file whose duplicates are existed.
+        Return
+          the file(with file-size) whose duplicates are existed,
+          AND
+          the file(with file-size) which had no duplicates originally but has now.
         """
         for k, v in small_hash_dict_temp.items():
             index_set = self.small_hash_dict[k]
+            is_single = len(index_set) == 1
             index_set |= v
             if len(index_set) > 1:
-                for index in v:
+                for index in (index_set if is_single else v):
                     yield index
 
     def _merge_full_hash_dict(self, full_hash_dict_temp: DefaultDict[HashValue, Set[FileIndex]]) -> Iterator[FileIndex]:
         """
         Merge the new full-hash-dict to self.full_hash_dict .
-        Return the file whose duplicates are existed.
+        Return
+          the file(with file-size) whose duplicates are existed,
+          AND
+          the file(with file-size) which had no duplicates originally but has now.
         """
         for k, v in full_hash_dict_temp.items():
             index_set = self.full_hash_dict[k]
+            is_single = len(index_set) == 1
             index_set |= v
             if len(index_set) > 1:
-                for index in v:
+                for index in (index_set if is_single else v):
                     yield index
 
     def _update_multiple_files_with_size(self, files_with_size: Iterable[Tuple[Path, FileSize]]) -> Set[FileIndex]:

@@ -17,7 +17,7 @@ from enum import IntEnum
 from io import BufferedReader
 from os import DirEntry, PathLike, scandir
 from pathlib import Path
-from typing import AnyStr, Callable, DefaultDict, Dict, Final, Iterable, Iterator, List, Literal, Optional, Sequence, Set, TextIO, Tuple, Union
+from typing import AnyStr, Callable, DefaultDict, Dict, Final, Generator, Iterable, Iterator, List, Literal, Optional, Sequence, Set, TextIO, Tuple, Union
 
 try:
     import xxhash
@@ -374,26 +374,20 @@ class JustOne:
             files_with_size.append((file, file_size))
         return self._update_multiple_files_with_size(files_with_size)
 
-    def _update_single_directory(self, single_dir: SinglePath) -> Set[FileIndex]:
-        """
-        Update one directory(all inner files recursively) to JustOne object.
-        """
-        try:
-            files_with_size = ((Path(entry.path), entry.stat().st_size)
-                               for entry in tqdm(JustOne._scan_dir(single_dir, ignore_error=self.ignore_error), 'Dig all file'))
-        except OSError as e: # TODO: replace with more specific Exceptions
-            # not accessible (permissions, etc)
-            raise UpdateError from e
-        return self._update_multiple_files_with_size(files_with_size)
-
     def _update_multiple_directories(self, dirs: IterablePaths) -> Set[FileIndex]:
         """
         Update multiple directories(all inner files recursively) to JustOne object.
         """
-        duplicate_files: Set[FileIndex] = set()
-        for d in dirs:
-            duplicate_files |= self._update_single_directory(d)
-        return duplicate_files
+        files_with_size_iters: List[Generator] = []
+        try:
+            for d in dirs:
+                files_with_size_iters.append(
+                    (Path(entry.path), entry.stat().st_size) for entry in tqdm(JustOne._scan_dir(d, ignore_error=self.ignore_error), 'Dig all file'))
+        except OSError as e: # TODO: replace with more specific Exceptions
+            # not accessible (permissions, etc)
+            raise UpdateError from e
+        files_with_size: Iterator[Tuple[Path, FileSize]] = itertools.chain(*files_with_size_iters)
+        return self._update_multiple_files_with_size(files_with_size)
 
     # No use for the time being.
     def _update_single_file(self, single_file: SinglePath) -> Set[FileIndex]:
@@ -492,7 +486,7 @@ class JustOne:
 
 def print_duplicates(dirpath: Path,
                      *dirpaths: Path,
-                     output: TextIO=sys.stdout,
+                     output: TextIO = sys.stdout,
                      strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT,
                      ignore_error: bool = False,
                      time_it: bool = False) -> int:
@@ -506,16 +500,19 @@ def print_duplicates(dirpath: Path,
             traceback.print_exc(chain=True)
         return 1
     end_time: float = time.time()
+    is_stdout: bool = output == sys.stdout
     for i, duplicates in enumerate(duplicates_list):
-        print(f'[{i+1}] Duplicate found:', file=output)
+        if i != 0:
+            print(f'', file=output) # divider
+        if is_stdout:
+            print(f'[{i+1}] Duplicate found:', file=output)
         for fp in duplicates:
             try:
-                print(f' - {fp}', file=output)
+                print(f'{" - " if is_stdout else ""}{fp}', file=output)
             except UnicodeEncodeError:
-                print(f' - {bytes(fp)}  [File Name Unicode Encode Error]', file=output)
-        print(f'', file=output)
+                print(f'{" - " if is_stdout else ""}{bytes(fp)}  [File Name Unicode Encode Error]', file=output)
     if time_it:
-        print(f'Time Waste: {end_time-start_time:.2f}s')
+        print(f'\nTime Waste: {end_time-start_time:.2f}s')
     return 0
 
 

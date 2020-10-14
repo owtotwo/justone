@@ -1,10 +1,47 @@
-"""
-Fast duplicate files finder.
-
-Typical Usage: py justone.py FOLDER [FOLDER ...] -t
+"""Fast duplicate files finder.
 
 Inspired by https://stackoverflow.com/a/36113168/300783
+
+Cli Typical Usage: py justone.py FOLDER [FOLDER ...] -t
+
+
+Sample:
+
+```
+import hashlib
+
+# find duplicate files
+dups_list = JustOne(hashlib.sha1).update('D:/data').update(Path('C:/Wegame')).duplicates()
+# OR dups_list = JustOne()('D:/data')(Path('C:/Wegame')).dup()
+
+# print them
+for dups in dups_list:
+    for d in dups:
+        print(d)
+    print('')
+```
+
+
+Classes:
+
+    JustOne
+
+Functions:
+
+    update(arg, *args) -> JustOne
+    duplicates(strict_level) -> Iterator[Sequence[Path]]
+
+Short Functions Alias:
+
+    dup = duplicates
+    __call__ = update
+
+Misc variables:
+
+    __version__
+
 """
+
 import argparse
 import filecmp
 import itertools
@@ -113,22 +150,33 @@ def format_exception_chain(e: BaseException) -> str:
 
 
 class JustOne:
+    """
+    Note: JustOne object is picklable.
+    """
     def __init__(self, hash_func: Callable = HASH_FUNCTION_DEFAULT, ignore_error: bool = False) -> None:
+        """This sets a hash function for identifying the same file.
+
+        Args:
+            hash_func: A hashlib-compliant hash function. (e.g.: hashlib.sha1)
+            ignore_error: Ignore the OSError such as PermissionError when dealing with files.
+
+        Returns:
+            None
         """
-        file_info: [
-          <Index, Path-Object, File-Size, Small-Hash, Full-Hash>
-          [0, Path('D:/abc/efg.txt'), 16801, '900150983cd24fb0', 'd6963f7d28e17f72'],
-          [1, Path(...), 14323, ..., ...],
-          [2, ...],
-          ...
-        ]
-        file_index: {
-            <Path-Object: Index>
-            Path('D:/abc/efg.txt'): 0,
-            Path(...): 1,
-            ...
-        }
-        """
+        # Member variables sample:
+        #   file_info: [
+        #     <Index, Path-Object, File-Size, Small-Hash, Full-Hash>
+        #     [0, Path('D:/abc/efg.txt'), 16801, '900150983cd24fb0', 'd6963f7d28e17f72'],
+        #     [1, Path(...), 14323, ..., ...],
+        #     [2, ...],
+        #     ...
+        #   ]
+        #   file_index: {
+        #       <Path-Object: Index>
+        #       Path('D:/abc/efg.txt'): 0,
+        #       Path(...): 1,
+        #       ...
+        #   }
         self.hash_func: Callable = hash_func
         self.ignore_error: bool = ignore_error
         self.file_info: List[Tuple[FileIndex, Path, FileSize, Optional[HashValue], Optional[HashValue]]] = []
@@ -138,12 +186,20 @@ class JustOne:
         self.full_hash_dict: DefaultDict[HashValue, Set[FileIndex]] = defaultdict(set)
 
     @staticmethod
-    def _scan_dir(dp: Union[AnyStr, PathLike], ignore_error: bool = False) -> Iterator[DirEntry]:
+    def _scan_dir(folder: Union[AnyStr, PathLike], ignore_error: bool = False) -> Iterator[DirEntry]:
+        """Traverse all files in the folder recursively.
+
+        Args:
+            folder: Folder path. (e.g.: 'D:/abc/' or Path('D:/abc/'))
+            ignore_error:
+                Ignore the OSError such as PermissionError when dealing with files.
+                If OSError is raised, silently swallow it.
+
+        Returns:
+            DirEntry objects of all files in the folder with any depth.
         """
-        :ignore_error: if OSError is raised, silently swallow it.
-        """
-        def _scan_dir_raw(dp: Union[AnyStr, PathLike]) -> Iterator[DirEntry]:
-            with scandir(dp) as it:
+        def _scan_dir_raw(folder: Union[AnyStr, PathLike]) -> Iterator[DirEntry]:
+            with scandir(folder) as it:
                 for entry in it:
                     if entry.is_dir():
                         for e in JustOne._scan_dir(entry.path, ignore_error=ignore_error):
@@ -153,12 +209,12 @@ class JustOne:
 
         if ignore_error:
             try:
-                for e in _scan_dir_raw(dp):
+                for e in _scan_dir_raw(folder):
                     yield e
             except OSError:
                 return
         else:
-            for e in _scan_dir_raw(dp):
+            for e in _scan_dir_raw(folder):
                 yield e
 
     @staticmethod
@@ -397,22 +453,29 @@ class JustOne:
         return self._update_multiple_files((single_file, ))
 
     def update(self, arg: Union[SinglePath, IterablePaths], *args: Union[SinglePath, IterablePaths]) -> 'JustOne':
-        """
-        The main api for JustOne object to update files.
+        """The main api for JustOne object to process files.
 
-        Could be chain calling like `JustOne(hashlib.sha1).update('D:\\data').update(Path('C:\\Wegame')).duplicates()`.
-        Return files whose duplicates are existed.
+        Args:
+            arg: File or folder path.
+            args: Files' path if arg is file, or folders' path if arg is folder.
+
+        Returns:
+            Self JustOne object, for chain calling like `JustOne(hashlib.sha1).update('D:/data').update(Path('C:/Wegame')).duplicates()`.
+
+        Raises:
+            UpdateError: Raises an exception if something wrong.
+        
         e.g.:
-          1. update(file_1, file_2, file_3)    [Not Recommended]: file stat() calling which is too slow
-          2. update(iterable_files)            [Not Recommended]: ditto
+          1. update(file_1, file_2, file_3)    [Not Recommended]: file stat() calling which is too slow.
+          2. update(iterable_files)            [Not Recommended]: ditto.
             - update([file_1, file_2])
-            - update((f for f in Path.cwd().glob('*') if f.is_file()))  # Note: This is a slow method because of f.is_file()
+            - update((f for f in Path.cwd().glob('*') if f.is_file()))  # Note: This is a slow method because of f.is_file().
           3. update(dir_1, dir_2, dir_3)       [Recommended]
           4. update(iterable_dirs)             [Recommended]
             - update([dir_1, dir_2])
-            - update((f for f in Path.cwd().iterdir() if f.is_dir()))  # Note: This is a slow method because of f.is_dir()
+            - update((f for f in Path.cwd().iterdir() if f.is_dir()))  # Note: This is a slow method because of f.is_dir().
         
-        * Not support mix file and directory as arguments, such as update(file_1, dir_1) OR update(file_1, [dir_1, dir_2])
+        * Not support mix file and directory as arguments, such as update(file_1, dir_1) OR update(file_1, [dir_1, dir_2]).
         """
         args_iter = itertools.chain(*((a, ) if isinstance(a, (str, Path)) else a for a in (arg, *args)))
         args_iter, peek = itertools.tee(args_iter)
@@ -457,16 +520,26 @@ class JustOne:
                 yield tuple(same_files)
 
     def duplicates(self, strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT) -> Iterator[Sequence[Path]]:
-        """
-        Return the duplicates: [
-            [file_A_1, file_A_2],
-            [file_B_1, file_B_2, file_B_3],
-            ...
-        ]
+        """Get duplicate files.
 
-        :strict_level: [0][COMMON] compare by hash value of the whole file.
-                       [1][SHALLOW] compare by file stat first, then byte-by-byte checking if stats are different.
-                       [2][BYTE_BY_BYTE] compare by byte-by-byte checking directly.
+        Args:
+            strict_level:
+                A level in StrictLevel, or its corresponding integer. (e.g.: StrictLevel.SHALLOW or 1)
+
+                [0][COMMON] compare by hash value of the whole file.
+                [1][SHALLOW] compare by file stat first, then byte-by-byte checking if stats are different.
+                [2][BYTE_BY_BYTE] compare by byte-by-byte checking directly.
+            
+        Returns:
+            Iterator for duplicate files.
+            e.g.: [
+                [file_A_1, file_A_2],
+                [file_B_1, file_B_2, file_B_3],
+                ...
+            ]
+
+        Raises:
+            GetDuplicatesError: Raises an exception if something wrong.
         """
         if strict_level == StrictLevel.COMMON:
             return self._duplicates_common()
@@ -490,6 +563,16 @@ def print_duplicates(dirpath: Path,
                      strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT,
                      ignore_error: bool = False,
                      time_it: bool = False) -> int:
+    """Print duplicate files.
+
+    Sample:
+        # Output the duplicate files in folders `dir1` and `dir2` to file `dupFiles.txt`.
+        with open('dupFiles.txt', 'wt', encoding='utf-8') as f:
+            print_duplicates('./dir1/', './dir2/', output=f, strict_level=1, ignore_error=True, time_it=True)
+    
+    Return:
+        0 if success, other integers if fail.
+    """
     justone = JustOne(ignore_error=ignore_error)
     start_time: float = time.time()
     try:

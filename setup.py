@@ -4,9 +4,6 @@ from justone import __version__ as justone_version
 with open('Readme.md', 'r', encoding='utf-8') as fh:
     long_description = fh.read()
 
-
-print(f'setuptools.find_packages() is {setuptools.find_packages()}')
-
 setuptools.setup(
     name='justone',
     version=justone_version,
@@ -19,11 +16,15 @@ setuptools.setup(
     py_modules=['justone'],
     packages=setuptools.find_packages(),
     classifiers=[
+        'Environment :: Console',
         'Programming Language :: Python :: 3 :: Only',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: Implementation :: CPython',
         'License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)',
         'Operating System :: Microsoft :: Windows :: Windows 10',
     ],
-    python_requires='>=3.7',
+    python_requires='>=3.8',
     entry_points={
         'console_scripts': [
             'justone = justone:main',

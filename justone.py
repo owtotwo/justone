@@ -54,7 +54,7 @@ from enum import IntEnum
 from io import BufferedReader
 from os import DirEntry, PathLike, scandir
 from pathlib import Path
-from typing import AnyStr, Callable, DefaultDict, Dict, Final, Generator, Iterable, Iterator, List, Literal, Optional, Sequence, Set, TextIO, Tuple, Union
+from typing import AnyStr, Callable, DefaultDict, Dict, Final, Generator, Iterable, Iterator, List, Literal, Optional, Sequence, Set, TextIO, Tuple, Type, Union
 
 try:
     import xxhash
@@ -78,17 +78,16 @@ __author__: Final[str] = 'owtotwo'
 __copyright__: Final[str] = 'Copyright 2020 owtotwo'
 __credits__: Final[Sequence[str]] = ['owtotwo']
 __license__: Final[str] = 'LGPLv3'
-__version__: Final[str] = '0.1.6'
+__version__: Final[str] = '0.2.0'
 __maintainer__: Final[str] = 'owtotwo'
 __email__: Final[str] = 'owtotwo@163.com'
 __status__: Final[str] = 'Experimental'
 
-# TODO: add type hints for Type Alias
-FileIndex = int # the index of file_info
-FileSize = int # the number of bytes
-HashValue = bytes # the return type of hash function
-SinglePath = Union[str, Path] # same as open(SinglePath)
-IterablePaths = Iterable[SinglePath]
+FileIndex: Type = int # the index of file_info
+FileSize: Type = int # the number of bytes
+HashValue: Type = bytes # the type of hash calculation result
+SinglePath: Type = Union[str, Path] # file or directory
+IterablePaths: Type = Iterable[SinglePath] # some files or directories
 
 
 class StrictLevel(IntEnum):
@@ -618,13 +617,18 @@ def parse_args():
                         '--strict',
                         action='count',
                         default=0,
-                        help=(f'[0][default] 基于hash比较\n'
-                              f'[1][-s] 基于文件stat的shallow对比，不一致时进行字节对比，防止hash碰撞\n'
-                              f'[2][-ss] 严格逐个字节对比，防止文件stat与hash碰撞'))
-    parser.add_argument('-i', '--ignore-error', action='store_const', const=True, default=False, help='忽略权限、文件不存在等异常，继续执行（此时将忽略相应文件的重复可能）')
-    parser.add_argument('-t', '--time', action='store_const', const=True, default=False, help='记录总用时消耗')
-    parser.add_argument('-o', '--output', metavar='OUTPUT', type=get_output_file, default=None, help='查重结果输出到指定文件')
-    parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='显示此命令行当前版本')
+                        help=(f'[0][default] Based on hash comparison.\n'
+                              f'[1][-s] Shallow comparison based on file stat, and byte comparison when inconsistent, to prevent hash collision.\n'
+                              f'[2][-ss] Strictly compare byte by byte to prevent file stat and hash collision.'))
+    parser.add_argument('-i',
+                        '--ignore-error',
+                        action='store_const',
+                        const=True,
+                        default=False,
+                        help='Ignore exceptions such as PermissionError or FileNotExisted.')
+    parser.add_argument('-t', '--time', action='store_const', const=True, default=False, help='Show total time consumption.')
+    parser.add_argument('-o', '--output', metavar='OUTPUT', type=get_output_file, default=None, help='Output result to file.')
+    parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help='Show the current version of this command line tool.')
 
     args: argparse.Namespace = parser.parse_args()
     if args.strict not in (0, 1, 2):
@@ -636,7 +640,7 @@ def main() -> int:
     try:
         args: argparse.Namespace = parse_args()
     except argparse.ArgumentTypeError as e:
-        print(f'命令行参数错误：{format_exception_chain(e)}')
+        print(f'Cli arguments Error: {format_exception_chain(e)}')
         return 1
     dirs: Final[Sequence[Path]] = args.directory
     if args.output is not None:

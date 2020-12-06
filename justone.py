@@ -201,20 +201,17 @@ class JustOne:
             with scandir(folder) as it:
                 for entry in it:
                     if entry.is_dir():
-                        for e in JustOne._scan_dir(entry.path, ignore_error=ignore_error):
-                            yield e
+                        yield from JustOne._scan_dir(entry.path, ignore_error=ignore_error)
                     else:
                         yield entry
 
         if ignore_error:
             try:
-                for e in _scan_dir_raw(folder):
-                    yield e
+                yield from _scan_dir_raw(folder)
             except OSError:
                 return
         else:
-            for e in _scan_dir_raw(folder):
-                yield e
+            yield from _scan_dir_raw(folder)
 
     @staticmethod
     def _get_hash(fp: Path,
@@ -341,8 +338,7 @@ class JustOne:
             is_single = len(index_set) == 1
             index_set |= v
             if len(index_set) > 1:
-                for index in (index_set if is_single else v):
-                    yield index
+                yield from (index_set if is_single else v)
 
     def _merge_full_hash_dict(self, full_hash_dict_temp: DefaultDict[HashValue, Set[FileIndex]]) -> Iterator[FileIndex]:
         """
@@ -357,8 +353,7 @@ class JustOne:
             is_single = len(index_set) == 1
             index_set |= v
             if len(index_set) > 1:
-                for index in (index_set if is_single else v):
-                    yield index
+                yield from (index_set if is_single else v)
 
     def _update_multiple_files_with_size(self, files_with_size: Iterable[Tuple[Path, FileSize]]) -> Set[FileIndex]:
         """
@@ -515,8 +510,7 @@ class JustOne:
                         same_files.append(file)
                         break
                 diff_files.append([file])
-            for same_files in diff_files:
-                yield tuple(same_files)
+            yield from diff_files
 
     def duplicates(self, strict_level: Union[StrictLevel, Literal[0, 1, 2]] = STRICT_LEVEL_DEFAULT) -> Iterator[Sequence[Path]]:
         """Get duplicate files.
